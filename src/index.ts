@@ -1,41 +1,35 @@
+import { DefaultArtifactClient } from "@actions/artifact";
 import * as core from "@actions/core";
-import RuntimeHttpClient from "./runtime-http-client";
-import { fail } from "./utils";
 import { getDefaultFilter } from "./artifact-filter";
+import { fail } from "./utils";
 
-/**
- * The main run function.
- */
-async function run(): Promise<void> {
-    const client = new RuntimeHttpClient();
+(async function () {
+    try {
+        const client = new DefaultArtifactClient();
+        let failureCount = 0;
 
-    // get the artifacts
-    const artifacts = await client.listArtifacts();
-    if (!artifacts.success) {
-        fail("Failed to load artifacts.");
-        return;
-    }
+        // Get the artifacts associated with this workflow run.
+        const { artifacts } = await client.listArtifacts();
+        const filter = getDefaultFilter();
 
-    let failureCount = 0;
-    const filter = getDefaultFilter();
-
-    // iterate over the matching artifacts
-    for (const artifact of filter(artifacts.data.value)) {
-        const del = await client.deleteArtifact(artifact.url);
-
-        if (del.success) {
-            core.info(`Successfully deleted artifact: "${artifact.name}"`);
-        } else {
-            core.error(`Failed to delete artifact: "${artifact.name}"`);
-            failureCount++;
+        // Iterate over the filtered artifacts, and remove them.
+        for (const { name } of filter(artifacts)) {
+            if (await client.deleteArtifact(name)) {
+                core.info(`Successfully deleted artifact: "${name}"`);
+            } else {
+                core.error(`Failed to delete artifact: "${name}"`);
+                failureCount++;
+            }
         }
+
+        if (failureCount > 0) {
+            fail(
+                `Failed to delete ${failureCount} artifact${
+                    failureCount !== 1 ? "s" : ""
+                }.`
+            );
+        }
+    } catch (err) {
+        core.setFailed(<string | Error>err);
     }
-
-    // determine the overall success
-    if (failureCount > 0) {
-        fail("1 or more artifacts failed to delete.");
-    }
-}
-
-run();
-
+})();
